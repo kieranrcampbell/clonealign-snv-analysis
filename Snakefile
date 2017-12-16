@@ -26,6 +26,10 @@ dna_initial_snvs = expand("data/{dna_sample_name}/dna/variants/bed_initial_snvs/
 dna_sample_name = dna_sample_names, clone = clones)
 dna_clone_specific_beds_unfiltered = expand("data/{dna_sample_name}/dna/variants/clone_specific_beds/{dna_sample_name}-clone_{clone}_SNVs.bed", dna_sample_name = dna_sample_names, clone = clones)
 
+dna_depths = expand("data/{dna_sample_name}/dna/variants/clone_variant_depths/{dna_sample_name}_SNVs_from_clone_{snv_clone}_depth_in_clone_{bam_clone}.tsv", dna_sample_name = dna_sample_names, snv_clone = clones, bam_clone = clones)
+
+dna_clone_specific_beds_filtered = expand("data/{dna_sample_name}/dna/variants/clone_specific_beds/{dna_sample_name}-clone_{clone}_SNVs_filtered.bed", dna_sample_name = dna_sample_names, clone = clones)
+
 
 # rna_cell_bams = expand("data/rna/bam/{sample_name}_cell_{barcode}.bam", 
 #                         sample_name = rna_sample_name, barcode = cell_barcodes)
@@ -43,7 +47,9 @@ dna_clone_specific_beds_unfiltered = expand("data/{dna_sample_name}/dna/variants
 rule all:
     input:
         dna_initial_snvs,
-        dna_clone_specific_beds_unfiltered
+        dna_clone_specific_beds_unfiltered,
+        dna_depths,
+        dna_clone_specific_beds_filtered
 
 
 # DNA specific analysis here ------
@@ -99,6 +105,25 @@ rule clone_specific_beds:
         "data/{dna_sample_name}/dna/variants/clone_specific_beds/{dna_sample_name}-clone_{clone}_SNVs.bed"
     shell:
         "bedtools subtract -a {input.bed} -b {input.germline} > {output}"
+
+rule dna_depth:
+    input:
+        snvs = "data/{dna_sample_name}/dna/variants/clone_specific_beds/{dna_sample_name}-clone_{snv_clone}_SNVs.bed",
+        bam = "data/{dna_sample_name}/dna/bam/{dna_sample_name}-cluster_{bam_clone}.sorted.realigned.rmdups.bam"
+    output:
+        "data/{dna_sample_name}/dna/variants/clone_variant_depths/{dna_sample_name}_SNVs_from_clone_{snv_clone}_depth_in_clone_{bam_clone}.tsv"
+    shell:
+        "samtools depth -b {input.snvs} {input.bam} > {output}"
+
+rule filter_beds:
+    input:
+        bed="data/{dna_sample_name}/dna/variants/clone_specific_beds/{dna_sample_name}-clone_{clone}_SNVs.bed",
+        depth=dna_depths
+    output:
+        "data/{dna_sample_name}/dna/variants/clone_specific_beds/{dna_sample_name}-clone_{clone}_SNVs_filtered.bed"
+    shell:
+        "python scripts/filter_snv.py --input_bed {input.bed} --depth_template data/{wildcards.dna_sample_name}/dna/variants/clone_variant_depths/{wildcards.dna_sample_name}_SNVs_from_clone_{wildcards.clone}_depth_in_clone_CLONE.tsv --clone {wildcards.clone} --output_bed {output}"
+
     
 
 
