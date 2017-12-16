@@ -31,6 +31,15 @@ dna_depths = expand("data/{dna_sample_name}/dna/variants/clone_variant_depths/{d
 dna_clone_specific_beds_filtered = expand("data/{dna_sample_name}/dna/variants/clone_specific_beds/{dna_sample_name}-clone_{clone}_SNVs_filtered.bed", dna_sample_name = dna_sample_names, clone = clones)
 
 
+
+rna_cell_bams = expand("data/rna/bam/{rna_sample_name}_cell_{barcode}.bam", 
+                        rna_sample_name = rna_sample_names, barcode = cell_barcodes)
+rna_cell_pileup = expand("data/{rna_sample_name}/rna/variants/bcf_by_clone/{rna_sample_name}-cell_{barcode}_variants_for_clone_{clone}_in_{dna_sample_name}.bcf", rna_sample_name = rna_sample_names, barcode = cell_barcodes, clone = clones, dna_sample_name = dna_sample_names)
+rna_cell_variants = expand("data/{rna_sample_name}/rna/variants/vcf_by_clone/{rna_sample_name}-cell_{barcode}_variants_for_clone_{clone}_in_{dna_sample_name}.vcf", rna_sample_name = rna_sample_names, barcode = cell_barcodes, clone = clones, dna_sample_name = dna_sample_names)
+collate_logs = expand("data/{rna_sample_name}/rna/variants/logs/{rna_sample_name}-cell_{barcode}_variants_for_clone_{clone}_in_{dna_sample_name}.txt",
+rna_sample_name = rna_sample_names, barcode = cell_barcodes, clone = clones, dna_sample_name = dna_sample_names)
+
+
 # rna_cell_bams = expand("data/rna/bam/{sample_name}_cell_{barcode}.bam", 
 #                         sample_name = rna_sample_name, barcode = cell_barcodes)
 # rna_cell_fastq = expand("data/rna/fastq/{sample_name}_cell_{barcode}.fastq", 
@@ -49,7 +58,10 @@ rule all:
         dna_initial_snvs,
         dna_clone_specific_beds_unfiltered,
         dna_depths,
-        dna_clone_specific_beds_filtered
+        dna_clone_specific_beds_filtered,
+        # rna_cell_pileup#,
+        collate_logs
+
 
 
 # DNA specific analysis here ------
@@ -122,20 +134,56 @@ rule filter_beds:
     output:
         "data/{dna_sample_name}/dna/variants/clone_specific_beds/{dna_sample_name}-clone_{clone}_SNVs_filtered.bed"
     shell:
-        "python scripts/filter_snv.py --input_bed {input.bed} --depth_template data/{wildcards.dna_sample_name}/dna/variants/clone_variant_depths/{wildcards.dna_sample_name}_SNVs_from_clone_{wildcards.clone}_depth_in_clone_CLONE.tsv --clone {wildcards.clone} --output_bed {output}"
+        """
+        rm -f {output}
+        python3 scripts/filter_snv.py --input_bed {input.bed} --depth_template data/{wildcards.dna_sample_name}/dna/variants/clone_variant_depths/{wildcards.dna_sample_name}_SNVs_from_clone_{wildcards.clone}_depth_in_clone_CLONE.tsv --clone {wildcards.clone} --output_bed {output}
+        """
 
-    
+
+# python scripts/filter_snv.py --input_bed data/SA501X3F/dna/variants/clone_specific_beds/SA501X3F-clone_C_SNVs.bed --depth_template data/SA501X3F/dna/variants/clone_variant_depths/SA501X3F_SNVs_from_clone_C_depth_in_clone_CLONE.tsv --clone C --output_bed tmp.bed
+
+# RNA here -----------------
 
 
 
+rule split_rna_sam_on_barcode:
+    input:
+        "data/{}/rna/bam_from_10x/{}_possorted_genome_bam.bam".format(rna_sample_names, rna_sample_names)
+    output:
+        "data/{rna_sample_name}/rna/bam/{rna_sample_name}_cell_{barcode}.bam"
+    shell:
+        "samtools view -h {input} | grep '^\\@\\|{wildcards.barcode}' | samtools view -Sb -o {output} -"
 
-# rule split_rna_sam_on_barcode:
-#     input:
-#         "data/rna/bam_from_10x/{}_possorted_genome_bam.bam".format(rna_sample_name)
-#     output:
-#         "data/rna/bam/{sample_name}_cell_{barcode}.bam"
-#     shell:
-#         "samtools view -h {input} | grep '^\\@\\|{wildcards.barcode}' | samtools view -Sb -o {output} -"
+
+rule rna_pileup:
+    input:
+        clone_bedfile="data/{dna_sample_name}/dna/variants/clone_specific_beds/{dna_sample_name}-clone_{clone}_SNVs_filtered.bed",
+        bam="data/{rna_sample_name}/rna/bam/{rna_sample_name}_cell_{barcode}.bam",
+        ref = ref_genome
+    output:
+        "data/{rna_sample_name}/rna/variants/bcf_by_clone/{rna_sample_name}-cell_{barcode}_variants_for_clone_{clone}_in_{dna_sample_name}.bcf"
+    shell:
+        "samtools mpileup -l {input.clone_bedfile} -R -g -f {input.ref} {input.bam} > {output}"
+
+rule rna_call_variants:
+    input:
+        "data/{rna_sample_name}/rna/variants/bcf_by_clone/{rna_sample_name}-cell_{barcode}_variants_for_clone_{clone}_in_{dna_sample_name}.bcf"
+    output:
+        "data/{rna_sample_name}/rna/variants/vcf_by_clone/{rna_sample_name}-cell_{barcode}_variants_for_clone_{clone}_in_{dna_sample_name}.vcf"
+    shell:
+        "bcftools call -c -v {input} > {output}"
+
+rule rna_collate_snvs:
+    input:
+        "data/{rna_sample_name}/rna/variants/vcf_by_clone/{rna_sample_name}-cell_{barcode}_variants_for_clone_{clone}_in_{dna_sample_name}.vcf"
+    output:
+        "data/{rna_sample_name}/rna/variants/logs/{rna_sample_name}-cell_{barcode}_variants_for_clone_{clone}_in_{dna_sample_name}.txt"
+    shell:
+        """
+        Rscript scripts/parse_vcf.R --input_vcf {input} --cell_barcode {wildcards.barcode} --clone {wildcards.clone} >> data/{wildcards.rna_sample_name}/rna/variants/cell_snps.csv
+        touch {output}
+        """
+
 
 
 
